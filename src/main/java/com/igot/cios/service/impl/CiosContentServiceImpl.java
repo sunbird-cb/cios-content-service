@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.igot.cios.constant.CiosConstants;
 import com.igot.cios.constant.ContentSource;
+import com.igot.cios.dto.PaginatedResponse;
+import com.igot.cios.dto.RequestDto;
 import com.igot.cios.entity.CornellContentEntity;
 import com.igot.cios.entity.UpgradContentEntity;
 import com.igot.cios.exception.CiosContentException;
@@ -20,8 +22,12 @@ import org.apache.poi.ss.usermodel.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Timestamp;
@@ -51,41 +57,45 @@ public class CiosContentServiceImpl implements CiosContentService {
     @Override
     public void loadContentFromExcel(MultipartFile file,String providerName) {
         log.info("CiosContentServiceImpl::loadJobsFromExcel");
-        List<Map<String, String>> processedData = processExcelFile(file);
-        log.info("No.of processedData from excel: " + processedData.size());
-        JsonNode jsonData = objectMapper.valueToTree(processedData);
-        ContentSource contentSource = ContentSource.fromProviderName(providerName);
-        if (contentSource == null) {
-            log.warn("Unknown provider name: " + providerName);
-            return;
-        }
-        List<CornellContentEntity> cornellContentEntityList = new ArrayList<>();
-        List<UpgradContentEntity> upgradContentEntityList=new ArrayList<>();
-        switch (contentSource) {
-            case CORNELL:
-                log.info("inside cornell data");
-                jsonData.forEach(eachContentData->{
-                    JsonNode transformData = transformData(eachContentData, contentSource.getFilePath());
-                    payloadValidation.validatePayload(CiosConstants.CORNELL_DATA_PAYLOAD_VALIDATION_FILE, transformData);
-                    String externalId = transformData.path("content").path("externalId").asText();
-                    Timestamp currentTime = new Timestamp(System.currentTimeMillis());
-                    CornellContentEntity cornellContentEntity=saveOrUpdateCornellContent(externalId, transformData, eachContentData, currentTime);
-                    cornellContentEntityList.add(cornellContentEntity);
-                });
-                cornellBulkSave(cornellContentEntityList);
-                break;
-            case UPGRAD:
-                log.info("inside upgrad data");
-                jsonData.forEach(eachContentData->{
-                    JsonNode transformData = transformData(eachContentData, contentSource.getFilePath());
-                    payloadValidation.validatePayload(CiosConstants.CORNELL_DATA_PAYLOAD_VALIDATION_FILE, transformData);
-                    String externalId = transformData.path("content").path("externalId").asText();
-                    Timestamp currentTime = new Timestamp(System.currentTimeMillis());
-                    UpgradContentEntity upgradContentEntity=saveOrUpdateUpgradContent(externalId, transformData, eachContentData, currentTime);
-                    upgradContentEntityList.add(upgradContentEntity);
-                });
-                upgradBulkSave(upgradContentEntityList);
-                break;
+        try {
+            List<Map<String, String>> processedData = processExcelFile(file);
+            log.info("No.of processedData from excel: " + processedData.size());
+            JsonNode jsonData = objectMapper.valueToTree(processedData);
+            ContentSource contentSource = ContentSource.fromProviderName(providerName);
+            if (contentSource == null) {
+                log.warn("Unknown provider name: " + providerName);
+                return;
+            }
+            List<CornellContentEntity> cornellContentEntityList = new ArrayList<>();
+            List<UpgradContentEntity> upgradContentEntityList = new ArrayList<>();
+            switch (contentSource) {
+                case CORNELL:
+                    log.info("inside cornell data");
+                    jsonData.forEach(eachContentData -> {
+                        JsonNode transformData = transformData(eachContentData, contentSource.getFilePath());
+                        payloadValidation.validatePayload(CiosConstants.CORNELL_DATA_PAYLOAD_VALIDATION_FILE, transformData);
+                        String externalId = transformData.path("content").path("externalId").asText();
+                        Timestamp currentTime = new Timestamp(System.currentTimeMillis());
+                        CornellContentEntity cornellContentEntity = saveOrUpdateCornellContent(externalId, transformData, eachContentData, currentTime);
+                        cornellContentEntityList.add(cornellContentEntity);
+                    });
+                    cornellBulkSave(cornellContentEntityList);
+                    break;
+                case UPGRAD:
+                    log.info("inside upgrad data");
+                    jsonData.forEach(eachContentData -> {
+                        JsonNode transformData = transformData(eachContentData, contentSource.getFilePath());
+                        payloadValidation.validatePayload(CiosConstants.CORNELL_DATA_PAYLOAD_VALIDATION_FILE, transformData);
+                        String externalId = transformData.path("content").path("externalId").asText();
+                        Timestamp currentTime = new Timestamp(System.currentTimeMillis());
+                        UpgradContentEntity upgradContentEntity = saveOrUpdateUpgradContent(externalId, transformData, eachContentData, currentTime);
+                        upgradContentEntityList.add(upgradContentEntity);
+                    });
+                    upgradBulkSave(upgradContentEntityList);
+                    break;
+            }
+        }catch (Exception e){
+            throw new RuntimeException(e.getMessage());
         }
     }
 
@@ -98,27 +108,39 @@ public class CiosContentServiceImpl implements CiosContentService {
     }
 
     @Override
-    public List<JsonNode> fetchAllContentFromDb(String providerName) {
+    public PaginatedResponse<Object> fetchAllContentFromDb(RequestDto dto) {
         log.info("CiosContentServiceImpl::fetchAllCornellContentFromDb");
-        ContentSource contentSource = ContentSource.fromProviderName(providerName);
+        Pageable pageable= PageRequest.of(dto.getPage(), dto.getSize());
+        ContentSource contentSource = ContentSource.fromProviderName(dto.getProviderName());
         if (contentSource == null) {
-            log.warn("Unknown provider name: " + providerName);
-            return null; // Exit if the provider name is not recognized
+            log.warn("Unknown provider name: " + dto.getProviderName());
+            return null;
         }
         try {
+            Page<Object> pageData = null;
             switch (contentSource) {
                 case CORNELL:
-                    return contentRepository.findAllCiosData();
+                    pageData= contentRepository.findAllCiosDataAndIsActive(dto.getIsActive(),pageable);
+                    break;
                 case UPGRAD:
-                    return upgradContentRepository.findAllCiosData();
+                    pageData= upgradContentRepository.findAllCiosDataAndIsActive(dto.getIsActive(),pageable);
+                    break;
             }
+            return new PaginatedResponse<>(
+                    pageData.getContent(),
+                    pageData.getTotalPages(),
+                    pageData.getTotalElements(),
+                    pageData.getNumberOfElements(),
+                    pageData.getSize(),
+                    pageData.getNumber()
+            );
         } catch (DataAccessException dae) {
             log.error("Database access error while fetching content", dae.getMessage());
             throw new CiosContentException(CiosConstants.ERROR, "Database access error: " + dae.getMessage());
         } catch (Exception e) {
             throw new CiosContentException(CiosConstants.ERROR, e.getMessage());
         }
-        return null;
+
     }
 
     @Override
@@ -187,20 +209,21 @@ public class CiosContentServiceImpl implements CiosContentService {
     }
 
     private JsonNode transformData(Object sourceObject, String destinationPath) {
-        log.info("CiosContentServiceImpl::transformData");
-        String inputJson;
+        log.debug("CiosContentServiceImpl::transformData");
         try {
-            inputJson = objectMapper.writeValueAsString(sourceObject);
+        String inputJson = objectMapper.writeValueAsString(sourceObject);
+            List<Object> specJson = JsonUtils.classpathToList(destinationPath);
+            Chainr chainr = Chainr.fromSpec(specJson);
+            Object transformedOutput = chainr.transform(JsonUtils.jsonToObject(inputJson));
+            return objectMapper.convertValue(transformedOutput, JsonNode.class);
         } catch (JsonProcessingException e) {
+            log.error("Error transforming data", e);
             return null;
         }
-        List<Object> specJson = JsonUtils.classpathToList(destinationPath);
-        Chainr chainr = Chainr.fromSpec(specJson);
-        Object transformedOutput = chainr.transform(JsonUtils.jsonToObject(inputJson));
-        return objectMapper.convertValue(transformedOutput, JsonNode.class);
+
     }
     private List<Map<String, String>> processExcelFile(MultipartFile incomingFile) {
-        log.info("CiosContentServiceImpl::processExcelFile");
+        log.debug("CiosContentServiceImpl::processExcelFile");
         try {
             return validateFileAndProcessRows(incomingFile);
         } catch (Exception e) {
@@ -210,7 +233,7 @@ public class CiosContentServiceImpl implements CiosContentService {
     }
 
     private List<Map<String, String>> validateFileAndProcessRows(MultipartFile file) {
-        log.info("CiosContentServiceImpl::validateFileAndProcessRows");
+        log.debug("CiosContentServiceImpl::validateFileAndProcessRows");
         try (InputStream inputStream = file.getInputStream();
              Workbook workbook = WorkbookFactory.create(inputStream)) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -222,7 +245,7 @@ public class CiosContentServiceImpl implements CiosContentService {
     }
 
     private List<Map<String, String>> processSheetAndSendMessage(Sheet sheet) {
-        log.info("CiosContentServiceImpl::processSheetAndSendMessage");
+        log.debug("CiosContentServiceImpl::processSheetAndSendMessage");
         DataFormatter formatter = new DataFormatter();
         Row headerRow = sheet.getRow(0);
         List<Map<String, String>> dataRows = new ArrayList<>();
@@ -267,7 +290,6 @@ public class CiosContentServiceImpl implements CiosContentService {
 
             dataRows.add(rowData);
         }
-        log.info("Number of Data Rows Processed: " + dataRows.size());
         return dataRows;
     }
 }

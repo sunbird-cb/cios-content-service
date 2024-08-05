@@ -1,5 +1,6 @@
 package com.igot.cios.controller;
 
+import com.igot.cios.dto.RequestDto;
 import com.igot.cios.service.CiosContentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,10 +27,10 @@ public class CiosContentController {
         }
     }
 
-    @GetMapping(value = "/v1/readAllContentFromDb/{providername}")
-    public ResponseEntity<?> fetchContentFromDb(@PathVariable String providername) {
+    @PostMapping(value = "/v1/readAllContentFromDb")
+    public ResponseEntity<?> fetchContentFromDb(@RequestBody RequestDto dto) {
         try {
-            return ResponseEntity.ok(ciosContentService.fetchAllContentFromDb(providername));
+            return ResponseEntity.ok(ciosContentService.fetchAllContentFromDb(dto));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error during fetching of content from db: " + e.getMessage());

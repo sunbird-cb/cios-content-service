@@ -17,6 +17,7 @@ import java.util.Set;
 public class PayloadValidation {
     public void validatePayload(String fileName, JsonNode payload) {
         try {
+            log.debug("PayloadValidation :: validatePayload");
             JsonSchemaFactory schemaFactory = JsonSchemaFactory.getInstance();
             InputStream schemaStream = schemaFactory.getClass().getResourceAsStream(fileName);
             JsonSchema schema = schemaFactory.getSchema(schemaStream);
